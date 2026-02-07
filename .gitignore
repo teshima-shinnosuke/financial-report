@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.DS_Store
+.env
+*.log
+data/
+app/security_report_summarize.json
+app/security_report_summarize.json.bak
