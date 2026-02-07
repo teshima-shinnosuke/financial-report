@@ -19,3 +19,5 @@ uv run app/json-to-docx/json-to-docx.py -i 入力.json -o 出力.docx
 |-----------|------|-----------|
 | `-i`, `--input` | 入力JSONファイルのパス | `app/security_report_summarize.json.bak` |
 | `-o`, `--output` | 出力DOCXファイルのパス | `app/json-to-docx/output.docx` |
+
+#chinchin
