@@ -25,7 +25,7 @@ def main():
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     default_data_dir = os.path.join(base_dir, "data", "input", "securities-reports")
 
-    default_output = os.path.join(base_dir, "data", "medium-output", "security_report_summarize.json")
+    default_output = os.path.join(base_dir, "data", "medium-output", "report_summarize.json")
 
     # 財務諸表CSVのデフォルトパス
     default_csv = os.path.join(base_dir, "data", "input", "financial-statements", "financial_data.csv")
