@@ -1,0 +1,311 @@
+{
+    "meta": {
+      "company_code": "12345",
+      "title": "株式会社サンプル 2025年度経営報告書",
+      "max_characters": 15000,
+      "language": "ja"
+    },
+    "sections": [
+      {
+        "id": "executive_summary",
+        "title": "エグゼクティブサマリー",
+        "char_limit": 1000,
+        "content_guidelines": [
+          "企業の現状を1〜2文で要約",
+          "最大の経営課題を1つに絞って明示",
+          "提案の要旨（何を・なぜ・どう）",
+          "期待効果（定性＋定量）",
+          "主要リスクを簡潔に記載"
+        ],
+        "human_judgement_required": true,
+        "content": "株式会社サンプルは安定した収益基盤を持つ一方、成長鈍化が課題です。最大の経営課題は新規事業の立ち上げによる収益多様化です。提案はデジタルサービス事業への進出で、既存顧客基盤を活用し効率的に展開します。期待効果は売上10%増、競争力強化。主要リスクは人材不足と市場変動です。"
+      },
+      {
+        "id": "company_overview",
+        "title": "企業概要と外部環境",
+        "char_limit": 2000,
+        "content": "株式会社サンプルは東京都を拠点にITソリューションを提供。売上は年間50億円、主力はシステム開発事業。",
+        "subsections": [
+          {
+            "id": "company_profile",
+            "title": "企業概要",
+            "content_guidelines": [
+              "事業内容の要約",
+              "地域特性",
+              "事業構成・売上規模の特徴"
+            ],
+            "content": "ITシステム開発と運用サービスを展開。首都圏の企業が主要顧客。売上の70%がシステム開発、30%が運用サービス。"
+          },
+          {
+            "id": "external_environment",
+            "title": "外部環境（制約条件）",
+            "content_guidelines": [
+              "業界動向",
+              "市場需要の変化",
+              "規制・社会要因",
+              "PESTは分析名として明示しない"
+            ],
+            "content": "IT業界はDX需要が高まる一方、競争激化と人材不足が課題。規制強化や社会的責任への対応も求められる。"
+          }
+        ]
+      },
+      {
+        "id": "analysis",
+        "title": "定量・定性分析",
+        "char_limit": 3000,
+        "content": "財務・定性両面から現状を分析。",
+        "subsections": [
+          {
+            "id": "financial_analysis",
+            "title": "財務分析（定量）",
+            "content_guidelines": [
+              "収益性",
+              "安全性",
+              "成長性",
+              "効率性",
+              "同業または10社比較"
+            ],
+            "content": {
+              "narrative": "売上高は前年比5%増、営業利益率は10%。自己資本比率は40%で安全性良好。成長性は業界平均並み。効率性は同業他社と比較し高い。",
+              "key_metrics": ["売上高: 50億円", "営業利益率: 10%", "自己資本比率: 40%"],
+              "notes": "同業10社平均と比較し、収益性・効率性は上位。"
+            }
+          },
+          {
+            "id": "qualitative_analysis",
+            "title": "有価証券報告書分析（定性）",
+            "content_guidelines": [
+              "事業戦略の記述",
+              "人材・設備の制約",
+              "経営が認識しているリスク",
+              "LLM抽出＋人間アノテーション前提"
+            ],
+            "content": {
+              "narrative": "事業戦略はDX推進と新規事業開発。人材確保が課題。経営は市場変動リスクを認識。",
+              "evidence_items": [
+                {
+                  "theme": "DX推進",
+                  "evidence_summary": "社内システム刷新の投資計画あり。",
+                  "source_hint": "有価証券報告書2025年度 p.12"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "key_issues",
+        "title": "経営課題の特定",
+        "char_limit": 2000,
+        "structure": [
+          "表層課題（現象）",
+          "構造課題（メカニズム）",
+          "経営課題（意思決定レベル）"
+        ],
+        "constraints": [
+          "課題は1つに絞る（多くても主1＋従1）"
+        ],
+        "human_judgement_required": true,
+        "content": {
+          "surface_issue": "売上成長の鈍化",
+          "structural_issue": "新規事業の立ち上げが遅れている",
+          "management_issue": "収益多様化の意思決定が遅れている",
+          "why_now": "市場環境の変化と競争激化により、早急な対応が必要。",
+          "supporting_evidence": ["業界平均成長率との乖離", "社内会議記録"]
+        }
+      },
+      {
+        "id": "strategy",
+        "title": "成長戦略・提案内容",
+        "char_limit": 3500,
+        "content": "新規事業への進出と既存事業の強化を提案。",
+        "subsections": [
+          {
+            "id": "basic_policy",
+            "title": "基本方針",
+            "content_guidelines": [
+              "やること／やらないことの明示",
+              "選択と集中の宣言"
+            ],
+            "content": {
+              "do": ["デジタルサービス事業への進出", "既存顧客基盤の活用"],
+              "dont": ["低収益事業への投資"],
+              "policy_narrative": "選択と集中で高収益事業に注力。"
+            }
+          },
+          {
+            "id": "initiatives",
+            "title": "具体施策",
+            "constraints": [
+              "施策は2〜3本まで"
+            ],
+            "initiative_template": {
+              "description": "",
+              "linked_issue": "",
+              "execution_requirements": [
+                "人",
+                "金",
+                "時間"
+              ]
+            },
+            "content": {
+              "initiatives": [
+                {
+                  "name": "デジタルサービス事業立ち上げ",
+                  "description": "新規事業部門を設立し、デジタルサービスを展開。",
+                  "linked_issue": "収益多様化",
+                  "execution_requirements": {
+                    "people": "専門人材5名",
+                    "money": "初期投資1億円",
+                    "time": "1年"
+                  },
+                  "kpi": ["新規顧客獲得数", "売上増加率"],
+                  "expected_effect": "売上10%増、競争力強化",
+                  "risks_and_mitigations": "人材不足は外部採用で対応"
+                },
+                {
+                  "name": "既存顧客へのクロスセル強化",
+                  "description": "既存顧客向けに新サービスを提案し、売上拡大。",
+                  "linked_issue": "売上成長",
+                  "execution_requirements": {
+                    "people": "営業担当3名",
+                    "money": "マーケ予算2000万円",
+                    "time": "半年"
+                  },
+                  "kpi": ["既存顧客売上増加率"],
+                  "expected_effect": "既存顧客売上5%増",
+                  "risks_and_mitigations": "顧客ニーズ調査を徹底"
+                }
+              ]
+            }
+          },
+          {
+            "id": "fit_to_company",
+            "title": "当社で成立する理由",
+            "content_guidelines": [
+              "他社事例との共通点・相違点",
+              "当社固有の強み・制約"
+            ],
+            "human_judgement_required": true,
+            "content": {
+              "fit_narrative": "既存顧客基盤と専門人材が強み。他社事例と比較し、当社は迅速な意思決定が可能。",
+              "comparison": [
+                {
+                  "case_or_peer": "同業A社",
+                  "similarities": ["顧客基盤活用"],
+                  "differences": ["意思決定スピード"],
+                  "implication": "迅速な展開が可能"
+                }
+              ],
+              "company_specific_strengths": ["専門人材", "顧客基盤"],
+              "company_specific_constraints": ["人材確保の難しさ"]
+            }
+          }
+        ]
+      },
+      {
+        "id": "impact",
+        "title": "効果試算",
+        "char_limit": 2000,
+        "content": "新規事業による売上・利益増加を試算。",
+        "subsections": [
+          {
+            "id": "assumptions",
+            "title": "試算前提",
+            "content_guidelines": [
+              "仮定条件",
+              "控えめな前提であることを明示"
+            ],
+            "content": {
+              "assumptions": ["新規事業部門設立", "既存顧客の活用"],
+              "conservativeness_note": "控えめな売上増加率を設定"
+            }
+          },
+          {
+            "id": "quantitative_impact",
+            "title": "定量効果",
+            "metrics": [
+              "売上",
+              "利益率",
+              "キャッシュフロー"
+            ],
+            "content": {
+              "revenue": "55億円（+10%）",
+              "profit_margin": "12%",
+              "cash_flow": "5億円増加",
+              "calculation_notes": "新規事業による増加分を試算"
+            }
+          },
+          {
+            "id": "qualitative_impact",
+            "title": "定性的効果",
+            "content_guidelines": [
+              "受注安定性",
+              "人材定着",
+              "中長期競争力"
+            ],
+            "content": {
+              "effects": ["受注安定化", "人材定着率向上", "競争力強化"],
+              "narrative": "新規事業による受注安定化と人材定着が期待される。"
+            }
+          }
+        ]
+      },
+      {
+        "id": "roadmap",
+        "title": "実行ロードマップ",
+        "char_limit": 1500,
+        "timeline": [
+          "短期（0〜1年）",
+          "中期（1〜3年）",
+          "長期（3年以上）"
+        ],
+        "content": {
+          "short_term": ["新規事業部門設立", "専門人材採用"],
+          "mid_term": ["デジタルサービス展開", "既存顧客クロスセル強化"],
+          "long_term": ["事業拡大と海外展開"]
+        }
+      },
+      {
+        "id": "risks",
+        "title": "リスクと対応策",
+        "char_limit": 1000,
+        "risk_types": [
+          "実行リスク",
+          "外部環境リスク",
+          "代替案"
+        ],
+        "content": [
+          {
+            "risk_type": "実行リスク",
+            "risk": "人材不足",
+            "mitigation": "外部採用と教育強化",
+            "trigger_or_signal": "採用活動の進捗"
+          },
+          {
+            "risk_type": "外部環境リスク",
+            "risk": "市場変動",
+            "mitigation": "柔軟な事業運営",
+            "trigger_or_signal": "業界動向レポート"
+          },
+          {
+            "risk_type": "代替案",
+            "risk": "新規事業失敗時",
+            "mitigation": "既存事業強化",
+            "trigger_or_signal": "新規事業KPI未達"
+          }
+        ]
+      },
+      {
+        "id": "conclusion",
+        "title": "結論",
+        "char_limit": 500,
+        "content_guidelines": [
+          "提案の総括",
+          "企業にとっての意味",
+          "最後のメッセージ"
+        ],
+        "content": "新規事業への挑戦は企業の成長と競争力強化につながる。迅速な意思決定と実行が成功の鍵。"
+      }
+    ]
+  }
