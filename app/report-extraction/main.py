@@ -2,15 +2,15 @@ import os
 import sys
 import json
 import time
-import re
 import logging
 import argparse
 
 # 同ディレクトリの summarizer, loader をインポート
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from summarizer import summarize_all_strategies, STRATEGIES
-from loader import PDFLoader
+from sorting import tag_pages
+from securities_report_loader import load_pages
+from financial_statements_loader import load_financial_data
 
 from dotenv import load_dotenv
 
@@ -23,15 +23,23 @@ def main():
 
     # 引数パース（app/issue-extraction/ → app/ → プロジェクトルート）
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    default_data_dir = os.path.join(base_dir, "data", "input", "security")
+    default_data_dir = os.path.join(base_dir, "data", "input", "securities-reports")
 
     default_output = os.path.join(base_dir, "data", "medium-output", "security_report_summarize.json")
 
-    parser = argparse.ArgumentParser(description='Summarize financial reports.')
+    # 財務諸表CSVのデフォルトパス
+    default_csv = os.path.join(base_dir, "data", "input", "financial-statements", "financial_data.csv")
+    default_fs_output = os.path.join(base_dir, "data", "medium-output", "financial_statements.json")
+
+    parser = argparse.ArgumentParser(description='Extract and tag financial reports.')
     parser.add_argument('-i', '--input', default=default_data_dir,
                         help='Path to a PDF file or a directory containing PDFs')
     parser.add_argument('-o', '--output', default=default_output,
-                        help='Output JSON file path')
+                        help='Output JSON file path for securities reports')
+    parser.add_argument('--csv', default=default_csv,
+                        help='Input CSV file path for financial statements')
+    parser.add_argument('--fs-output', default=default_fs_output,
+                        help='Output JSON file path for financial statements')
     args = parser.parse_args()
 
     input_path = args.input
@@ -55,15 +63,11 @@ def main():
         print(f"Error: Input path not found: {input_path}")
         return
 
-    # ログ設定
-    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "processing.log")
+    # ログ設定（コンソール出力のみ）
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()
-        ]
+        handlers=[logging.StreamHandler()]
     )
     logger = logging.getLogger(__name__)
 
@@ -85,11 +89,9 @@ def main():
     # 処理済みファイルの判定マップ
     processed_map = {}
     for i, item in enumerate(results):
-        summaries = item.get("summaries", {})
-        if isinstance(summaries, dict) and "error" not in summaries and "企業概要" in summaries:
+        pages = item.get("pages", [])
+        if pages and "sections" in pages[0]:
             processed_map[item["filename"]] = i
-
-    loader = PDFLoader()
 
     for file_path in pdf_files:
         filename = os.path.basename(file_path)
@@ -101,55 +103,26 @@ def main():
 
         logger.info(f"Processing: {filename}...")
 
-        # PDFからテキスト抽出（全ページ）
+        # PDFからページ単位でテキスト抽出
         try:
-            text = loader.load_text(file_path)
+            pages = load_pages(file_path)
         except Exception as e:
             logger.error(f"  -> Failed to extract text: {e}")
             continue
 
-        if not text:
-            logger.warning(f"  -> Extracted text is empty.")
+        if not pages:
+            logger.warning(f"  -> Extracted pages are empty.")
             continue
 
-        logger.info(f"  -> Extracted {len(text)} chars. Summarizing (API Call)...")
+        logger.info(f"  -> Extracted {len(pages)} pages. Tagging (API Call)...")
 
-        # APIのレート制限回避
-        time.sleep(2)
-
-        # 要約実行
-        json_str = summarize_all_strategies(text)
-
-        # JSONパース
-        extracted_summaries = {}
-        try:
-            match = re.search(r'\{.*\}', json_str, re.DOTALL)
-            if match:
-                extracted_summaries = json.loads(match.group(0))
-            else:
-                raise json.JSONDecodeError("No JSON object found", json_str, 0)
-            logger.info(f"  -> Successfully summarized.")
-        except json.JSONDecodeError:
-            logger.error(f"  !! Failed to parse JSON response. Saving raw output.")
-            extracted_summaries = {
-                "error": "JSON parse error",
-                "raw_output": json_str,
-            }
-            for s in STRATEGIES:
-                extracted_summaries.setdefault(s, "取得失敗")
-
-        # エラーチェック（API課金エラー等）
-        if "error" in extracted_summaries and isinstance(extracted_summaries, dict):
-            error_msg = str(extracted_summaries.get("error", ""))
-            raw_out = str(extracted_summaries.get("raw_output", ""))
-            if "402" in error_msg or "Payment Required" in raw_out:
-                logger.critical("  !! API Quota Exceeded. Stopping processing.")
-                return
+        # ページ単位でセクション分割・タグ付け（5ページごとにAPIコール）
+        tagged_pages = tag_pages(pages, batch_size=5)
+        logger.info(f"  -> Tagged {len(tagged_pages)} pages.")
 
         file_summary = {
             "filename": filename,
-            "full_text": text,
-            "summaries": extracted_summaries,
+            "pages": tagged_pages,
         }
 
         # 既存エントリーがあれば更新、なければ追加
@@ -172,7 +145,25 @@ def main():
         print("-" * 50 + "\n")
         time.sleep(5)
 
-    logger.info(f"All processing completed. Saved to {output_file}")
+    logger.info(f"Securities report processing completed. Saved to {output_file}")
+
+    # --- 財務諸表CSV → JSON変換 ---
+    print("=" * 50)
+    logger.info("Starting financial statements processing...")
+
+    csv_path = args.csv
+    if not os.path.exists(csv_path):
+        logger.error(f"CSV file not found: {csv_path}")
+    else:
+        fs_output = args.fs_output
+        os.makedirs(os.path.dirname(fs_output), exist_ok=True)
+
+        data = load_financial_data(csv_path)
+        with open(fs_output, "w", encoding="utf-8") as f:
+            json.dump(data, indent=2, ensure_ascii=False, fp=f)
+        logger.info(f"Financial statements saved to {fs_output} ({len(data)} companies)")
+
+    logger.info("All processing completed.")
 
 
 if __name__ == "__main__":
