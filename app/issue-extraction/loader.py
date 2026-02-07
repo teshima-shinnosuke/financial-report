@@ -5,7 +5,7 @@ class PDFLoader:
     def __init__(self):
         pass
 
-    def load_text(self, file_path: str, max_pages: int = 15, keywords: list = None) -> str:
+    def load_text(self, file_path: str, max_pages: int = None, keywords: list = None) -> str:
         """
         PDFファイルからテキストを抽出する。
         キーワードが指定された場合、そのキーワードが含まれる周辺ページを優先的に抽出する。
@@ -51,21 +51,26 @@ class PDFLoader:
                         final_pages.append(p + 1)
                         
                 # ページ制限
-                pages_to_read = final_pages[:max_pages]
-                
-                # キーワードが見つからなかった、またはページ数が足りない場合は冒頭から埋める
-                if len(pages_to_read) < max_pages:
-                    for i in range(total_pages):
-                        if i not in pages_to_read:
-                            pages_to_read.append(i)
-                            if len(pages_to_read) >= max_pages:
-                                break
+                if max_pages is not None:
+                    pages_to_read = final_pages[:max_pages]
+                    # キーワードが見つからなかった、またはページ数が足りない場合は冒頭から埋める
+                    if len(pages_to_read) < max_pages:
+                        for i in range(total_pages):
+                            if i not in pages_to_read:
+                                pages_to_read.append(i)
+                                if len(pages_to_read) >= max_pages:
+                                    break
+                else:
+                    pages_to_read = final_pages
                 
                 pages_to_read.sort()
                 
             else:
-                # 通常モード（冒頭から）
-                pages_to_read = range(min(total_pages, max_pages))
+                # 通常モード
+                if max_pages is None:
+                    pages_to_read = range(total_pages)
+                else:
+                    pages_to_read = range(min(total_pages, max_pages))
             
             for i in pages_to_read:
                 page_text = reader.pages[i].extract_text()
