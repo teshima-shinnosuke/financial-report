@@ -18,18 +18,18 @@ from dotenv import load_dotenv
 def main():
     load_dotenv()
 
-    if not os.getenv("HF_TOKEN"):
-        print("Warning: HF_TOKEN is not set in environment variables. Please set it in .env file.")
+    if not os.getenv("AZURE_OPENAI_API_KEY") or not os.getenv("AZURE_OPENAI_ENDPOINT"):
+        print("Warning: AZURE_OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT is not set. Please set them in .env file.")
 
     # 引数パース（app/issue-extraction/ → app/ → プロジェクトルート）
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     default_data_dir = os.path.join(base_dir, "data", "input", "securities-reports")
 
-    default_output = os.path.join(base_dir, "data", "medium-output", "report_summarize.json")
+    default_output = os.path.join(base_dir, "data", "medium-output", "report-extraction", "report_summarize.json")
 
     # 財務諸表CSVのデフォルトパス
     default_csv = os.path.join(base_dir, "data", "input", "financial-statements", "financial_data.csv")
-    default_fs_output = os.path.join(base_dir, "data", "medium-output", "financial_statements.json")
+    default_fs_output = os.path.join(base_dir, "data", "medium-output", "report-etraction", "financial_statements.json")
 
     parser = argparse.ArgumentParser(description='Extract and tag financial reports.')
     parser.add_argument('-i', '--input', default=default_data_dir,

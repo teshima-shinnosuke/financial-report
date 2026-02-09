@@ -1,13 +1,14 @@
 import json
+import os
 import re
 import time
-from huggingface_hub import InferenceClient
+from openai import AzureOpenAI
 from dotenv import load_dotenv
 
 # .env ファイルをロード
 load_dotenv()
 
-DEFAULT_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_MODEL_ID = "gpt-5-mini"
 
 # 有価証券報告書の分析用タグ（8分類 + その他）
 PAGE_TAGS = [
@@ -23,7 +24,7 @@ PAGE_TAGS = [
 ]
 
 
-def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MODEL_ID, api_key: str = None) -> list[dict]:
+def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MODEL_ID) -> list[dict]:
     """
     ページのリストを受け取り、batch_sizeページごとにAPIでセクション分割・タグ付けする。
     1ページ内の複数セクションをそれぞれ分割し、個別にタグを付与する。
@@ -32,11 +33,11 @@ def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MO
         pages: load_pages() の戻り値 [{"page": 1, "text": "..."}, ...]
         batch_size: 1回のAPI呼び出しで処理するページ数
         model_id: 使用するモデルID
-        api_key: APIキー
 
     Returns:
         list[dict]: [{"page": 1, "sections": [{"tag": "経営戦略・中期ビジョン", "text": "..."}, ...]}, ...]
     """
+
     if not pages:
         return []
 
@@ -58,31 +59,38 @@ def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MO
 【タグ一覧（括弧内は小分類の参考キーワード）】
 {tags_list}
 
-【制約事項】
-1. 出力は必ずJSON形式のみにしてください。
-2. キーはページ番号（文字列）、値はセクションの配列にしてください。
-3. 各セクションは {{"tag": "タグ名", "text": "該当テキスト"}} の形式にしてください。
+【出力形式】
+1. 出力は必ずJSON形式のみにしてください。説明文やコードブロック記法は不要です。
+2. トップレベルは {{"pages": [...]}} とし、配列の各要素は {{"page": ページ番号(数値), "sections": [...]}} の形式にしてください。
+3. sections内の各要素は {{"tag": "タグ名", "text": "該当テキスト"}} の形式にしてください。
 4. tagは上記タグ一覧の番号なし名称部分（括弧内は含めない）を1つだけ選んでください。
 5. テキストは原文をそのまま使い、要約や省略はしないでください。
-6. 空白ページは {{"tag": "その他", "text": ""}} としてください。
+6. 空白ページは {{"page": N, "sections": [{{"tag": "その他", "text": ""}}]}} としてください。
 
-【出力例】
-{{"1": [{{"tag": "その他", "text": "有価証券報告書 提出日..."}}], "2": [{{"tag": "経営戦略・中期ビジョン", "text": "当社は..."}}]}}
+【期待する出力（この構造を厳守）】
+{{"pages": [{{"page": 1, "sections": [{{"tag": "その他", "text": "【表紙】\\n【提出書類】 有価証券報告書\\n..."}}]}}, {{"page": 2, "sections": [{{"tag": "財務・資本政策・ガバナンス", "text": "第一部 【企業情報】\\n..."}}]}}, {{"page": 5, "sections": [{{"tag": "事業・営業・受注戦略", "text": "３ 【事業の内容】\\n..."}}, {{"tag": "人的資本・組織運営", "text": "４ 【関係会社の状況】\\n..."}}]}}]}}
 
 【ページテキスト】
 {pages_text}"""
 
-        result = _call_api(prompt, max_tokens=8000, model_id=model_id, api_key=api_key)
+        result = _call_api(prompt, max_completion_tokens=8000, model_id=model_id)
 
         # レスポンスをパース
+        tag_map = {}
         try:
             match = re.search(r'\{.*\}', result, re.DOTALL)
             if match:
-                tag_map = json.loads(match.group(0))
-            else:
-                tag_map = {}
+                parsed = json.loads(match.group(0))
+                # 新形式: {"pages": [{"page": N, "sections": [...]}, ...]}
+                if "pages" in parsed and isinstance(parsed["pages"], list):
+                    for entry in parsed["pages"]:
+                        if isinstance(entry, dict) and "page" in entry:
+                            tag_map[str(entry["page"])] = entry.get("sections", [])
+                else:
+                    # 旧形式フォールバック: {"1": [...], "2": [...]}
+                    tag_map = parsed
         except json.JSONDecodeError:
-            tag_map = {}
+            pass
 
         for p in batch:
             sections = tag_map.get(str(p["page"]), [{"tag": "その他", "text": p["text"]}])
@@ -95,7 +103,6 @@ def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MO
                     if isinstance(s, str):
                         normalized.append({"tag": "その他", "text": s})
                     elif isinstance(s, dict):
-                        # tags (複数) が返ってきた場合は先頭を採用
                         if "tags" in s and "tag" not in s:
                             s["tag"] = s["tags"][0] if isinstance(s["tags"], list) and s["tags"] else "その他"
                             del s["tags"]
@@ -114,20 +121,23 @@ def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MO
     return tagged_pages
 
 
-def _call_api(prompt: str, max_tokens: int, model_id: str, api_key: str = None) -> str:
-    """APIを呼び出して結果を取得する内部関数"""
-    client = InferenceClient(api_key=api_key)
+def _call_api(prompt: str, max_completion_tokens: int, model_id: str) -> str:
+    """Azure OpenAI APIを呼び出して結果を取得する内部関数"""
+    client = AzureOpenAI(
+        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+        api_key=os.environ["AZURE_OPENAI_API_KEY"],
+        api_version="2024-12-01-preview",
+    )
 
     messages = [
         {"role": "user", "content": prompt}
     ]
 
     try:
-        response = client.chat_completion(
+        response = client.chat.completions.create(
             model=model_id,
             messages=messages,
-            max_tokens=max_tokens,
-            temperature=0.3,
+            max_completion_tokens=max_completion_tokens,
             response_format={"type": "json_object"},
         )
 
