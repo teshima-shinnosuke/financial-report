@@ -8,7 +8,7 @@ import argparse
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from section_sort import sort_by_tag, _extract_code
-from issue_extraction import score_report
+from issue_extraction import score_report, _load_fewshot_examples
 from local_feature_extraction import extract_category_feature, extract_overall_feature, CATEGORY_TAG_MAP, _get_company_info
 
 from dotenv import load_dotenv
@@ -26,6 +26,8 @@ def main():
                         help="財務指標JSONファイル（financial_indices_*.json）")
     parser.add_argument("-m", "--model", default="gpt-5-mini",
                         help="使用するモデルID")
+    parser.add_argument("--no-fewshot", action="store_true",
+                        help="few-shot例を使用しない")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -89,7 +91,15 @@ def main():
     # 2. スコアリング
     # ========================================
     logger.info("[2/3] スコアリング中...")
-    scored = score_report(sorted_report, model_id=args.model)
+
+    # few-shot例の読み込み
+    fewshot_examples = None
+    if not args.no_fewshot:
+        fewshot_examples = _load_fewshot_examples()
+        if fewshot_examples:
+            logger.info(f"  few-shot例を読み込みました: {len(fewshot_examples)} タグ")
+
+    scored = score_report(sorted_report, model_id=args.model, fewshot_examples=fewshot_examples)
 
     scores_dir = os.path.join(
         base_dir, "data", "medium-output", "issue-extraction", "report-scores-per-company"

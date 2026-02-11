@@ -20,6 +20,14 @@ TAG_ORDER = [
     "その他",
 ]
 
+# sorting.py の細分化タグ → section_sort.py の統合タグへのマッピング
+# None の場合はスコアリング対象外として除外する
+TAG_MERGE_MAP = {
+    "財務・資本政策": FINANCIAL_TAG,
+    "ガバナンス体制": FINANCIAL_TAG,
+    "株式事務": None,
+}
+
 def _extract_code(filename: str) -> str | None:
     """ファイル名から企業コード（括弧内の数字）を抽出する。"""
     match = re.search(r"[（(](\d+)[）)]", filename)
@@ -44,6 +52,14 @@ def sort_by_tag(report: dict, indices: dict | None = None) -> dict:
         for section in page.get("sections", []):
             tag = section.get("tag", "その他")
             text = section.get("text", "")
+            if len(text) <= 20:
+                continue
+            # 細分化タグの統合（sorting.py の新タグ → 統合タグ）
+            if tag in TAG_MERGE_MAP:
+                merged = TAG_MERGE_MAP[tag]
+                if merged is None:
+                    continue  # 株式事務など、スコアリング不要なタグは除外
+                tag = merged
             tag_sections[tag].append({"page": page_num, "text": text})
 
     # TAG_ORDER の順序でソートし、未知のタグは末尾に追加
@@ -173,7 +189,7 @@ def main():
         print(f"  {report['filename']}: {len(report['tags'])} タグ")
         for tag_group in report["tags"]:
             idx_status = "（財務指標あり）" if "financial_indices" in tag_group else ""
-            print(f"    - {tag_group['tag']}: {len(tag_group['sections'])} セク���ョン{idx_status}")
+            print(f"    - {tag_group['tag']}: {len(tag_group['sections'])} セクション{idx_status}")
 
 
 if __name__ == "__main__":

@@ -198,15 +198,15 @@ def main():
     paths = {
         "local_features": os.path.join(
             base_dir, "data", "medium-output", "issue-extraction",
-            "local-features-per-company", f"local_features_{code}_v1.json",
+            "local-features-per-company", f"local_features_{code}.json",
         ),
         "report_scores": os.path.join(
             base_dir, "data", "medium-output", "issue-extraction",
-            "report-scores-per-company", f"report_scores_{code}_v1.json",
+            "report-scores-per-company", f"report_scores_{code}_v2.json",
         ),
         "selection": os.path.join(
             base_dir, "data", "medium-output", "solution-selection",
-            "solution-selection-per-company", f"solution_selection_{code}.json",
+            f"solution_selection_{code}.json",
         ),
         "roadmap": os.path.join(
             base_dir, "data", "medium-output", "solution-selection",

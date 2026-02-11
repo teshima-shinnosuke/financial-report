@@ -69,6 +69,66 @@ TAG_SCORING_ITEMS = {
 }
 
 
+def _load_fewshot_examples(fewshot_path: str | None = None) -> dict:
+    """fewshot.json を読み込み、タグ名 -> {input_sections, expected_output} の辞書を返す。"""
+    if fewshot_path is None:
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        fewshot_path = os.path.join(base_dir, "data", "input", "fewshot", "fewshot.json")
+
+    if not os.path.exists(fewshot_path):
+        return {}
+
+    with open(fewshot_path, "r", encoding="utf-8") as f:
+        all_examples = json.load(f)
+
+    examples = {}
+    for entry in all_examples:
+        tag = entry.get("tag", "")
+        if tag:
+            examples[tag] = {
+                "input_sections": entry.get("input_sections", []),
+                "expected_output": entry.get("expected_output", {}),
+            }
+    return examples
+
+
+def _build_example_text(tag: str, fewshot_examples: dict) -> str:
+    """タグに対応するfew-shot例からプロンプト用テキストを生成する。"""
+    if tag not in fewshot_examples:
+        return ""
+
+    example = fewshot_examples[tag]
+    sections = example.get("input_sections", [])
+    expected = example.get("expected_output", {})
+
+    # 入力セクションを抜粋（先頭500文字に切り詰め）
+    section_parts = []
+    total_chars = 0
+    for s in sections:
+        text = s.get("text", "")
+        page = s.get("page", "?")
+        remaining = 500 - total_chars
+        if remaining <= 0:
+            section_parts.append("...（以下省略）")
+            break
+        if len(text) > remaining:
+            text = text[:remaining] + "..."
+        section_parts.append(f"[p.{page}] {text}")
+        total_chars += len(text)
+
+    sections_text = "\n".join(section_parts) if section_parts else "（該当セクションなし）"
+    expected_json = json.dumps(expected, ensure_ascii=False, indent=2)
+
+    return f"""【実際の評価例】
+以下は同業種の別企業の「{tag}」に対する実際の評価例です。スコア水準や根拠の書き方の参考にしてください。
+
+[入力テキスト（抜粋）]
+{sections_text}
+
+[期待される出力]
+{expected_json}"""
+
+
 def _call_api(prompt: str, max_completion_tokens: int = 4000, model_id: str = DEFAULT_MODEL_ID) -> str:
     """Azure OpenAI APIを呼び出す。"""
     client = AzureOpenAI(
@@ -130,6 +190,7 @@ def score_tag(
     tag_group: dict,
     model_id: str = DEFAULT_MODEL_ID,
     other_tag_summaries: list[dict] | None = None,
+    fewshot_examples: dict | None = None,
 ) -> dict:
     """
     1つのタググループに対してスコアリングを実行する。
@@ -139,6 +200,7 @@ def score_tag(
         model_id: 使用するモデルID
         other_tag_summaries: 経営戦略タグ用。他タグの評価結果リスト
             [{"tag": "...", "avg_score": 3.5, "summary": "..."}, ...]
+        fewshot_examples: _load_fewshot_examples() の戻り値
 
     Returns:
         {"tag": "...", "items": [{"item": "...", "score": 1-5, "rationale": "..."}, ...], "summary": "..."}
@@ -185,6 +247,16 @@ def score_tag(
         management_instruction = """
 - 「経営戦略・中期ビジョン」は他の全タグを横断的に評価する項目です。上記の【他タグの評価結果】も参考にし、経営戦略が各分野の取り組みと整合的かどうかも踏まえて評価してください。"""
 
+    # few-shot例の構築
+    example_section = ""
+    if fewshot_examples:
+        example_section = _build_example_text(tag, fewshot_examples)
+
+    if not example_section:
+        # フォールバック: 既存の合成例
+        example_section = """【出力例】
+{{"items": [{{"item": "経営理念・パーパスについて、事業活動や意思決定と結びついた形で明確に示されているか。", "score": 3, "rationale": "経営理念として「社会基盤の創造」を掲げており方向性は示されているが、具体的な事業活動や意思決定との結びつきについての記載が不足している。"}}, {{"item": "中期経営計画について、売上・利益・ROE等の数値目標が具体的に設定されているか。", "score": 4, "rationale": "中期経営計画において売上高3,000億円、営業利益率5%、ROE8%以上という具体的な数値目標が明示されている。達成時期も2026年度と明確である。"}}], "summary": "経営理念は事業活動と結びついた形で明示されており、中期経営計画では具体的な数値目標も設定されている。一方、KPIの進捗管理体制や実行施策の詳細については記載が不足しており、計画の実効性を担保する仕組みの開示が今後の課題である。"}}"""
+
     prompt = f"""あなたは建設業の有価証券報告書を分析する専門家です。
 以下の「{tag}」に関するテキストを読み、各評価項目について5段階でスコアリングし、根拠を述べてください。
 
@@ -201,8 +273,7 @@ def score_tag(
 【出力形式（JSON）】
 {{"items": [{{"item": "評価項目名", "score": 1-5の整数, "rationale": "スコアの根拠（2-3文）"}}], "summary": "このタグ全体の総括コメント（200字程度）"}}
 
-【出力例】
-{{"items": [{{"item": "経営理念・パーパスについて、事業活動や意思決定と結びついた形で明確に示されているか。", "score": 3, "rationale": "経営理念として「社会基盤の創造」を掲げており方向性は示されているが、具体的な事業活動や意思決定との結びつきについての記載が不足している。"}}, {{"item": "中期経営計画について、売上・利益・ROE等の数値目標が具体的に設定されているか。", "score": 4, "rationale": "中期経営計画において売上高3,000億円、営業利益率5%、ROE8%以上という具体的な数値目標が明示されている。達成時期も2026年度と明確である。"}}], "summary": "経営理念は事業活動と結びついた形で明示されており、中期経営計画では具体的な数値目標も設定されている。一方、KPIの進捗管理体制や実行施策の詳細については記載が不足しており、計画の実効性を担保する仕組みの開示が今後の課題である。"}}
+{example_section}
 
 【制約】
 - 必ずJSON形式のみで回答してください。余計なテキストは含めないでください。
@@ -239,7 +310,7 @@ def score_tag(
     return {"tag": tag, "items": items, "summary": summary}
 
 
-def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
+def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID, fewshot_examples: dict | None = None) -> dict:
     """
     1つの報告書の全タグをスコアリングする。
     経営戦略・中期ビジョンは他タグのスコアリング完了後に最後に評価する。
@@ -262,7 +333,7 @@ def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
 
         tag_group = tag_group_map.get(tag, {"tag": tag, "sections": []})
         logger.info(f"    [{tag}] スコアリング中...")
-        result = score_tag(tag_group, model_id=model_id)
+        result = score_tag(tag_group, model_id=model_id, fewshot_examples=fewshot_examples)
         other_scores.append(result)
 
         for item in result.get("items", []):
@@ -287,6 +358,7 @@ def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
         management_group,
         model_id=model_id,
         other_tag_summaries=other_tag_summaries,
+        fewshot_examples=fewshot_examples,
     )
 
     for item in management_result.get("items", []):
@@ -316,6 +388,7 @@ def main():
     parser.add_argument("-o", "--output", default=default_output, help="出力JSONファイルパス")
     parser.add_argument("-m", "--model", default=DEFAULT_MODEL_ID, help="使用するモデルID")
     parser.add_argument("-f", "--filename", default=None, help="特定のファイル名のみ処理する（部分一致）")
+    parser.add_argument("--no-fewshot", action="store_true", help="few-shot例を使用しない")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -325,8 +398,19 @@ def main():
     )
     logger = logging.getLogger(__name__)
 
+    # few-shot例の読み込み
+    fewshot_examples = None
+    if not args.no_fewshot:
+        fewshot_examples = _load_fewshot_examples()
+        if fewshot_examples:
+            logger.info(f"few-shot例を読み込みました: {len(fewshot_examples)} タグ")
+
     with open(args.input, "r", encoding="utf-8") as f:
         reports = json.load(f)
+
+    # 単一辞書の場合はリストに変換
+    if isinstance(reports, dict):
+        reports = [reports]
 
     # --filename フィルタ
     if args.filename:
@@ -359,7 +443,7 @@ def main():
             continue
 
         logger.info(f"  処理開始: {filename}")
-        scored = score_report(report, model_id=args.model)
+        scored = score_report(report, model_id=args.model, fewshot_examples=fewshot_examples)
         results.append(scored)
 
         # 1報告書ごとに保存
