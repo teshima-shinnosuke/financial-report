@@ -191,72 +191,55 @@ def generate_roadmap(
 ) -> dict:
     """
     実行ロードマップセクションを生成する。
-    Mid レベル: 施策×タイムライン（短期/中期/長期）のマトリクス。
+    フェーズごとに「やること」と「理想状態」を簡潔に示す。
     """
     selection_text = _build_selection_text(selection)
-
-    initiative_names = [
-        sol.get("施策名", "") for sol in selection.get("selected_solutions", [])
-    ]
-    names_text = "、".join(f"施策{i+1}: {n}" for i, n in enumerate(initiative_names))
 
     prompt = f"""あなたは建設業の経営コンサルタントです。
 以下の選定施策を踏まえ、実行ロードマップを生成してください。
 
 【方針】
-- 短期（0〜1年）: 制度設計・パイロット・体制構築
-- 中期（1〜3年）: 本格展開・効果検証・改善
-- 長期（3年以上）: 全社定着・次のステージへの発展
-- 施策は {len(initiative_names)} 本: {names_text}
-- 各フェーズに施策横断のアクションを2〜3項目ずつ記載。
-- 施策間の依存関係があれば明示。
+- 短期（0〜1年）・中期（1〜3年）・長期（3年以上）の3フェーズで構成。
+- 各フェーズに「やるべきこと」を2〜3行の箇条書きと、「理想状態」を1文で記載する。
+- やるべきことは施策横断で、当社の規模・体制で実現可能な範囲に留める。
 
 【選定施策】
 {selection_text}
 
 【出力形式（JSON）】
 {{
-  "short_term": [
-    {{
-      "action": "短期アクション名",
-      "linked_initiatives": ["対応する施策名"],
-      "milestone": "達成マイルストーン",
-      "detail": "具体的な内容（50字程度）"
-    }}
-  ],
-  "mid_term": [
-    {{
-      "action": "中期アクション名",
-      "linked_initiatives": ["対応する施策名"],
-      "milestone": "達成マイルストーン",
-      "detail": "具体的な内容（50字程度）"
-    }}
-  ],
-  "long_term": [
-    {{
-      "action": "長期アクション名",
-      "linked_initiatives": ["対応する施策名"],
-      "milestone": "達成マイルストーン",
-      "detail": "具体的な内容（50字程度）"
-    }}
-  ]
+  "short_term": {{
+    "actions": ["やるべきこと1", "やるべきこと2"],
+    "ideal_state": "このフェーズ終了時の理想状態（1文）"
+  }},
+  "mid_term": {{
+    "actions": ["やるべきこと1", "やるべきこと2"],
+    "ideal_state": "このフェーズ終了時の理想状態（1文）"
+  }},
+  "long_term": {{
+    "actions": ["やるべきこと1", "やるべきこと2"],
+    "ideal_state": "このフェーズ終了時の理想状態（1文）"
+  }}
 }}
 
 【制約】
 - JSON形式のみで回答。
-- 各フェーズ2〜3項目（合計6〜9項目）。
-- 全体で1500字以内。
-- 施策名はselected_solutionsの名称をそのまま使用。"""
+- 各フェーズのactionsは2〜3項目、各項目は1行（40字以内）。
+- ideal_stateは1文（60字以内）。
+- 全体で800字以内。"""
 
-    result = _call_api(prompt, max_completion_tokens=4000, model_id=model_id)
+    logger = logging.getLogger(__name__)
+    result = _call_api(prompt, max_completion_tokens=3000, model_id=model_id)
+    logger.info(f"  ロードマップAPI応答(先頭300字): {result[:300]}")
     parsed = _parse_json_response(result)
+    logger.info(f"  ロードマップparse結果キー: {list(parsed.keys())}")
 
     return {
         "id": "roadmap",
         "title": "実行ロードマップ",
-        "short_term": parsed.get("short_term", []),
-        "mid_term": parsed.get("mid_term", []),
-        "long_term": parsed.get("long_term", []),
+        "short_term": parsed.get("short_term", {}),
+        "mid_term": parsed.get("mid_term", {}),
+        "long_term": parsed.get("long_term", {}),
     }
 
 
