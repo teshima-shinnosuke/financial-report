@@ -34,33 +34,36 @@ def load_pages(file_path: str) -> list[dict]:
         return []
 
 
+def _extract_code(filename: str) -> str:
+    import re
+    match = re.search(r"(\d+)", filename)
+    if match:
+        return match.group(1)
+    return re.sub(r"[^a-zA-Z0-9_]", "", os.path.splitext(filename)[0])
+
+
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    default_input = os.path.join(base_dir, "data", "input", "securities-reports")
-    default_output = os.path.join(base_dir, "data", "medium-output", "report-extraction", "securities_report_pages.json")
 
-    parser = argparse.ArgumentParser(description="PDFからページ単位でテキストを抽出する")
-    parser.add_argument("-i", "--input", default=default_input, help="PDFファイルまたはディレクトリのパス")
-    parser.add_argument("-o", "--output", default=default_output, help="出力JSONファイルパス")
+    parser = argparse.ArgumentParser(description="1つのPDFからページ単位でテキストを抽出する")
+    parser.add_argument("-i", "--input", required=True, help="入力PDFファイルパス")
+    parser.add_argument("-o", "--output", default=None, help="出力JSONファイルパス（未指定時は自動生成）")
     args = parser.parse_args()
 
-    input_path = args.input
-    if os.path.isfile(input_path):
-        pdf_files = [input_path]
-    elif os.path.isdir(input_path):
-        pdf_files = [os.path.join(input_path, f) for f in os.listdir(input_path) if f.lower().endswith('.pdf')]
-    else:
-        print(f"Error: Input path not found: {input_path}")
-        pdf_files = []
+    if not os.path.isfile(args.input) or not args.input.lower().endswith(".pdf"):
+        print(f"Error: PDFファイルを指定してください: {args.input}")
+        exit(1)
 
-    results = []
-    for pdf_path in pdf_files:
-        pages = load_pages(pdf_path)
-        results.append({"filename": os.path.basename(pdf_path), "pages": pages})
-        print(f"{os.path.basename(pdf_path)}: {len(pages)}ページ")
+    filename = os.path.basename(args.input)
+    code = _extract_code(filename)
+    pages = load_pages(args.input)
+    print(f"{filename}: {len(pages)}ページ")
 
-    if results:
-        os.makedirs(os.path.dirname(args.output), exist_ok=True)
-        with open(args.output, "w", encoding="utf-8") as f:
-            json.dump(results, indent=2, ensure_ascii=False, fp=f)
-        print(f"出力完了: {args.output} ({len(results)}ファイル)")
+    result = {"filename": filename, "pages": pages}
+
+    output_dir = os.path.join(base_dir, "data", "medium-output", "report-extraction", "report-pages")
+    output_path = args.output or os.path.join(output_dir, f"report_pages_{code}.json")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(result, indent=2, ensure_ascii=False, fp=f)
+    print(f"出力完了: {output_path}")

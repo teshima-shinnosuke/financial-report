@@ -121,6 +121,17 @@ def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MO
     return tagged_pages
 
 
+import argparse
+import logging
+
+
+def _extract_code(filename: str) -> str:
+    match = re.search(r"(\d+)", filename)
+    if match:
+        return match.group(1)
+    return re.sub(r"[^a-zA-Z0-9_]", "", os.path.splitext(filename)[0])
+
+
 def _call_api(prompt: str, max_completion_tokens: int, model_id: str) -> str:
     """Azure OpenAI APIを呼び出して結果を取得する内部関数"""
     client = AzureOpenAI(
@@ -148,3 +159,44 @@ def _call_api(prompt: str, max_completion_tokens: int, model_id: str) -> str:
             "error": f"Error occurred during summarization: {str(e)}"
         }
         return json.dumps(error_json, ensure_ascii=False)
+
+
+if __name__ == "__main__":
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    parser = argparse.ArgumentParser(description="1つのページ抽出JSONをタグ付けする")
+    parser.add_argument("-i", "--input", required=True, help="入力JSONファイル（report_pages_*.json）")
+    parser.add_argument("-o", "--output", default=None, help="出力JSONファイルパス（未指定時は自動生成）")
+    parser.add_argument("-m", "--model", default=DEFAULT_MODEL_ID, help="使用するモデルID")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler()],
+    )
+    logger = logging.getLogger(__name__)
+
+    with open(args.input, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # リスト形式の場合は先頭を取得
+    if isinstance(data, list):
+        data = data[0]
+
+    filename = data.get("filename", "")
+    code = _extract_code(filename)
+    pages = data.get("pages", [])
+    logger.info(f"対象: {filename} (コード: {code}, {len(pages)}ページ)")
+
+    tagged_pages = tag_pages(pages, batch_size=5, model_id=args.model)
+    logger.info(f"タグ付け完了: {len(tagged_pages)}ページ")
+
+    result = {"filename": filename, "pages": tagged_pages}
+
+    output_dir = os.path.join(base_dir, "data", "medium-output", "report-extraction", "report-tagged-per-company")
+    output_path = args.output or os.path.join(output_dir, f"report_tagged_{code}.json")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, ensure_ascii=False)
+    logger.info(f"保存完了: {output_path}")

@@ -208,26 +208,25 @@ def load_financial_data(csv_path: str, company_code: str = None, year: int = Non
 def main():
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     default_csv = os.path.join(base_dir, "data", "input", "financial-statements", "financial_data.csv")
-    default_output = os.path.join(base_dir, "data", "medium-output", "report-extraction", "financial_statements.json")
 
-    parser = argparse.ArgumentParser(description="財務諸表CSVをJSON形式で出力する")
+    parser = argparse.ArgumentParser(description="1企業の財務諸表CSVをJSON形式で出力する")
     parser.add_argument("-i", "--input", default=default_csv, help="入力CSVファイルパス")
-    parser.add_argument("-c", "--code", default=None, help="企業コード（指定しない場合は全企業）")
-    parser.add_argument("-y", "--year", type=int, default=None, help="年度（指定しない場合は全年度）")
-    parser.add_argument("-o", "--output", default=default_output, help="出力JSONファイルパス")
+    parser.add_argument("-c", "--code", required=True, help="企業コード")
+    parser.add_argument("-o", "--output", default=None, help="出力JSONファイルパス（未指定時は自動生成）")
     args = parser.parse_args()
 
-    data = load_financial_data(args.input, company_code=args.code, year=args.year)
+    data = load_financial_data(args.input, company_code=args.code)
 
-    json_str = json.dumps(data, indent=2, ensure_ascii=False)
+    if not data:
+        print(f"企業コード '{args.code}' のデータが見つかりません。")
+        return
 
-    if args.output:
-        os.makedirs(os.path.dirname(args.output), exist_ok=True)
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(json_str)
-        print(f"出力完了: {args.output} ({len(data)}件)")
-    else:
-        print(json_str)
+    output_dir = os.path.join(base_dir, "data", "medium-output", "report-extraction", "financial-statements-per-company")
+    output_path = args.output or os.path.join(output_dir, f"financial_statements_{args.code}.json")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"出力完了: {output_path}")
 
 
 if __name__ == "__main__":

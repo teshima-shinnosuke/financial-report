@@ -311,28 +311,36 @@ def calculate_indices(company_data: dict) -> dict:
 
 def main():
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    default_input = os.path.join(base_dir, "data", "medium-output", "report-extraction", "financial_statements.json")
-    default_output = os.path.join(base_dir, "data", "medium-output", "report-extraction", "financial_indices.json")
 
-    parser = argparse.ArgumentParser(description="財務諸表から各種財務指標を算出する")
-    parser.add_argument("-i", "--input", default=default_input, help="入力 financial_statements.json パス")
-    parser.add_argument("-o", "--output", default=default_output, help="出力 financial_indices.json パス")
+    parser = argparse.ArgumentParser(description="1企業の財務諸表から各種財務指標を算出する")
+    parser.add_argument("-i", "--input", required=True,
+                        help="入力JSONファイル（financial_statements_*.json）")
+    parser.add_argument("-o", "--output", default=None,
+                        help="出力JSONファイルパス（未指定時は自動生成）")
     args = parser.parse_args()
 
     with open(args.input, "r", encoding="utf-8") as f:
         fs_map = json.load(f)
 
-    all_results = {}
-    for code, company_data in fs_map.items():
-        name = company_data.get("企業情報", {}).get("コード", code)
-        print(f"  {name}: 指標計算中...")
-        all_results[code] = calculate_indices(company_data)
+    # 単一企業 or 複数企業の先頭を処理
+    if isinstance(fs_map, dict) and "企業情報" in fs_map:
+        # 直接1企業分のデータの場合
+        code = fs_map.get("企業情報", {}).get("コード", "unknown")
+        result = calculate_indices(fs_map)
+    else:
+        # {コード: {企業情報, 財務データ}} 形式の場合、先頭を取得
+        code = next(iter(fs_map))
+        company_data = fs_map[code]
+        result = calculate_indices(company_data)
 
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(all_results, f, indent=2, ensure_ascii=False)
+    print(f"  コード {code}: 指標計算完了")
 
-    print(f"\n指標計算完了: {len(all_results)} 社 -> {args.output}")
+    output_dir = os.path.join(base_dir, "data", "medium-output", "report-extraction", "financial-indices-per-company")
+    output_path = args.output or os.path.join(output_dir, f"financial_indices_{code}.json")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, ensure_ascii=False)
+    print(f"出力完了: {output_path}")
 
 
 if __name__ == "__main__":
