@@ -11,6 +11,8 @@ load_dotenv()
 
 DEFAULT_MODEL_ID = "gpt-5-mini"
 
+MANAGEMENT_TAG = "経営戦略・中期ビジョン"
+
 # タグごとの評価項目定義
 TAG_SCORING_ITEMS = {
     "経営戦略・中期ビジョン": [
@@ -124,12 +126,22 @@ def _build_indices_text(financial_indices: dict) -> str:
     return "\n".join(lines)
 
 
-def score_tag(tag_group: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
+def score_tag(
+    tag_group: dict,
+    model_id: str = DEFAULT_MODEL_ID,
+    other_tag_summaries: list[dict] | None = None,
+) -> dict:
     """
     1つのタググループに対してスコアリングを実行する。
 
+    Args:
+        tag_group: タググループ {"tag": "...", "sections": [...], ...}
+        model_id: 使用するモデルID
+        other_tag_summaries: 経営戦略タグ用。他タグの評価結果リスト
+            [{"tag": "...", "avg_score": 3.5, "summary": "..."}, ...]
+
     Returns:
-        {"tag": "...", "items": [{"item": "...", "score": 1-5, "rationale": "..."}, ...]}
+        {"tag": "...", "items": [{"item": "...", "score": 1-5, "rationale": "..."}, ...], "summary": "..."}
     """
     tag = tag_group.get("tag", "")
     scoring_items = TAG_SCORING_ITEMS.get(tag)
@@ -140,12 +152,38 @@ def score_tag(tag_group: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
     # セクションテキストの構築
     section_text = _build_section_text(tag_group)
 
+    # セクションがない場合のハンドリング
+    if not section_text.strip():
+        # 経営戦略タグかつ他タグサマリーがある場合はAPIで評価する
+        if tag == MANAGEMENT_TAG and other_tag_summaries:
+            section_text = "（当タグに直接該当するセクションはありません）"
+        else:
+            items = [
+                {"item": item, "score": None, "rationale": "該当セクションなし"}
+                for item in scoring_items
+            ]
+            return {"tag": tag, "items": items, "summary": "該当するセクションが報告書内に見つかりませんでした。"}
+
     # 財務タグの場合、財務指標データも追加
     financial_text = ""
     if "financial_indices" in tag_group:
         financial_text = "\n\n【財務指標データ】\n" + _build_indices_text(tag_group["financial_indices"])
 
+    # 経営戦略タグ用：他タグの評価サマリーをコンテキストとして追加
+    cross_tag_context = ""
+    if tag == MANAGEMENT_TAG and other_tag_summaries:
+        context_lines = []
+        for ts in other_tag_summaries:
+            context_lines.append(f"  - {ts['tag']}（平均スコア: {ts['avg_score']:.1f}）: {ts['summary']}")
+        cross_tag_context = "\n\n【他タグの評価結果（参考情報）】\n" + "\n".join(context_lines)
+
     items_text = "\n".join(f"  {i+1}. {item}" for i, item in enumerate(scoring_items))
+
+    # 経営戦略タグ用の追加指示
+    management_instruction = ""
+    if tag == MANAGEMENT_TAG and other_tag_summaries:
+        management_instruction = """
+- 「経営戦略・中期ビジョン」は他の全タグを横断的に評価する項目です。上記の【他タグの評価結果】も参考にし、経営戦略が各分野の取り組みと整合的かどうかも踏まえて評価してください。"""
 
     prompt = f"""あなたは建設業の有価証券報告書を分析する専門家です。
 以下の「{tag}」に関するテキストを読み、各評価項目について5段階でスコアリングし、根拠を述べてください。
@@ -172,10 +210,10 @@ def score_tag(tag_group: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
 - itemフィールドには評価項目の文言をそのまま記載してください。
 - scoreは1〜5の整数のみ使用してください。
 - rationaleは具体的な記載内容に基づいて2-3文で記述してください。
-- summaryにはこのタグ全体を総括するコメントを200字程度で記述してください。強みと課題の両面に触れてください。
+- summaryにはこのタグ全体を総括するコメントを200字程度で記述してください。強みと課題の両面に触れてください。{management_instruction}
 
 【分析対象テキスト】
-{section_text}{financial_text}"""
+{section_text}{financial_text}{cross_tag_context}"""
 
     result = _call_api(prompt, max_completion_tokens=4000, model_id=model_id)
 
@@ -202,25 +240,65 @@ def score_tag(tag_group: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
 
 
 def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID) -> dict:
-    """1つの報告書の全タグをスコアリングする。"""
+    """
+    1つの報告書の全タグをスコアリングする。
+    経営戦略・中期ビジョンは他タグのスコアリング完了後に最後に評価する。
+    TAG_SCORING_ITEMS に定義された全タグを、セクションの有無に関わらず出力する。
+    """
     logger = logging.getLogger(__name__)
-    scores = []
 
+    # レポート内のタググループを辞書化（タグ名 -> tag_group）
+    tag_group_map = {}
     for tag_group in report.get("tags", []):
-        tag = tag_group.get("tag", "")
-        if tag not in TAG_SCORING_ITEMS:
-            logger.info(f"    [{tag}] スキップ（評価対象外）")
+        tag_group_map[tag_group.get("tag", "")] = tag_group
+
+    # 経営戦略以外のタグを先にスコアリング
+    other_scores = []
+    other_tag_summaries = []
+
+    for tag in TAG_SCORING_ITEMS:
+        if tag == MANAGEMENT_TAG:
             continue
 
+        tag_group = tag_group_map.get(tag, {"tag": tag, "sections": []})
         logger.info(f"    [{tag}] スコアリング中...")
         result = score_tag(tag_group, model_id=model_id)
-        scores.append(result)
+        other_scores.append(result)
 
         for item in result.get("items", []):
             score = item.get("score", "?")
             logger.info(f"      {item.get('item', '?')}: {score}/5")
 
+        # サマリー情報を収集（経営戦略タグ評価時のコンテキスト用）
+        valid_scores = [it.get("score") for it in result.get("items", []) if it.get("score") is not None]
+        avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+        other_tag_summaries.append({
+            "tag": tag,
+            "avg_score": avg_score,
+            "summary": result.get("summary", ""),
+        })
+
         time.sleep(2)
+
+    # 経営戦略・中期ビジョンを最後にスコアリング（他タグのサマリーをコンテキストとして渡す）
+    management_group = tag_group_map.get(MANAGEMENT_TAG, {"tag": MANAGEMENT_TAG, "sections": []})
+    logger.info(f"    [{MANAGEMENT_TAG}] スコアリング中...（他タグの評価結果を参照）")
+    management_result = score_tag(
+        management_group,
+        model_id=model_id,
+        other_tag_summaries=other_tag_summaries,
+    )
+
+    for item in management_result.get("items", []):
+        score = item.get("score", "?")
+        logger.info(f"      {item.get('item', '?')}: {score}/5")
+
+    # TAG_SCORING_ITEMS の定義順序で結果を並べる
+    scores_map = {MANAGEMENT_TAG: management_result}
+    for result in other_scores:
+        scores_map[result["tag"]] = result
+
+    scores = [scores_map[tag] for tag in TAG_SCORING_ITEMS if tag in scores_map]
 
     return {
         "filename": report.get("filename", ""),

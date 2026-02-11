@@ -145,6 +145,8 @@ def main():
 
     with open(args.input, "r", encoding="utf-8") as f:
         reports = json.load(f)
+    if isinstance(reports, dict):
+        reports = [reports]
 
     # --filename フィルタ
     if args.filename:
