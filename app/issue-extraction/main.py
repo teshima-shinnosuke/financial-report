@@ -4,6 +4,7 @@ import re
 import json
 import logging
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -28,6 +29,10 @@ def main():
                         help="使用するモデルID")
     parser.add_argument("--no-fewshot", action="store_true",
                         help="few-shot例を使用しない")
+    parser.add_argument("--scores-output", default=None,
+                        help="スコアリング出力パス（未指定時は自動生成）")
+    parser.add_argument("--features-output", default=None,
+                        help="地域特徴出力パス（未指定時は自動生成）")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -104,7 +109,7 @@ def main():
     scores_dir = os.path.join(
         base_dir, "data", "medium-output", "issue-extraction", "report-scores-per-company"
     )
-    scores_path = os.path.join(scores_dir, f"report_scores_{code}_v1.json")
+    scores_path = args.scores_output or os.path.join(scores_dir, f"report_scores_{code}_v1.json")
     os.makedirs(scores_dir, exist_ok=True)
     # リスト形式で保存（既存フォーマットと合わせる）
     with open(scores_path, "w", encoding="utf-8") as f:
@@ -129,10 +134,15 @@ def main():
     }
 
     category_texts = {}
-    for category in CATEGORY_TAG_MAP:
-        logger.info(f"    [{category}] 抽出中...")
-        text = extract_category_feature(reports_list, category, model_id=args.model)
-        category_texts[category] = text
+    logger.info(f"    3カテゴリを並列抽出中...")
+
+    def _extract_one(cat):
+        return cat, extract_category_feature(reports_list, cat, model_id=args.model)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        for cat, text in executor.map(lambda c: _extract_one(c), CATEGORY_TAG_MAP):
+            category_texts[cat] = text
+            logger.info(f"    [{cat}] 完了")
 
     logger.info("    [全体の地域的特徴] 統合分析中...")
     overall_text = extract_overall_feature(category_texts, model_id=args.model)
@@ -148,7 +158,7 @@ def main():
     features_dir = os.path.join(
         base_dir, "data", "medium-output", "issue-extraction", "local-features-per-company"
     )
-    features_path = os.path.join(features_dir, f"local_features_{code}.json")
+    features_path = args.features_output or os.path.join(features_dir, f"local_features_{code}.json")
     os.makedirs(features_dir, exist_ok=True)
     with open(features_path, "w", encoding="utf-8") as f:
         json.dump(features_output, f, indent=2, ensure_ascii=False)

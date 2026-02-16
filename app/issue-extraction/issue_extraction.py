@@ -4,6 +4,7 @@ import re
 import time
 import logging
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
@@ -12,6 +13,7 @@ load_dotenv()
 DEFAULT_MODEL_ID = "gpt-5-mini"
 
 MANAGEMENT_TAG = "経営戦略・中期ビジョン"
+FINANCIAL_TAG = "財務・資本政策・ガバナンス"
 
 # タグごとの評価項目定義
 TAG_SCORING_ITEMS = {
@@ -241,6 +243,9 @@ def score_tag(
 
     items_text = "\n".join(f"  {i+1}. {item}" for i, item in enumerate(scoring_items))
 
+    # 財務タグはサマリーを厚めに出力
+    summary_length = "600字程度" if tag == FINANCIAL_TAG else "200字程度"
+
     # 経営戦略タグ用の追加指示
     management_instruction = ""
     if tag == MANAGEMENT_TAG and other_tag_summaries:
@@ -271,7 +276,7 @@ def score_tag(
 {items_text}
 
 【出力形式（JSON）】
-{{"items": [{{"item": "評価項目名", "score": 1-5の整数, "rationale": "スコアの根拠（2-3文）"}}], "summary": "このタグ全体の総括コメント（200字程度）"}}
+{{"items": [{{"item": "評価項目名", "score": 1-5の整数, "rationale": "スコアの根拠（2-3文）"}}], "summary": "このタグ全体の総括コメント（{summary_length}）"}}
 
 {example_section}
 
@@ -281,7 +286,8 @@ def score_tag(
 - itemフィールドには評価項目の文言をそのまま記載してください。
 - scoreは1〜5の整数のみ使用してください。
 - rationaleは具体的な記載内容に基づいて2-3文で記述してください。
-- summaryにはこのタグ全体を総括するコメントを200字程度で記述してください。強みと課題の両面に触れてください。{management_instruction}
+- summaryにはこのタグ全体を総括するコメントを{summary_length}で記述してください。強みと課題の両面に触れてください。
+- rationaleおよびsummaryは「です・ます」調の敬語で記述してください。{management_instruction}
 
 【分析対象テキスト】
 {section_text}{financial_text}{cross_tag_context}"""
@@ -310,6 +316,43 @@ def score_tag(
     return {"tag": tag, "items": items, "summary": summary}
 
 
+def _generate_overall_summary(all_tag_summaries: list[dict], model_id: str = DEFAULT_MODEL_ID) -> str:
+    """全タグのスコアリング結果から強み・弱みの総括を生成する。"""
+    context_lines = []
+    for ts in all_tag_summaries:
+        context_lines.append(f"- {ts['tag']}（平均スコア: {ts['avg_score']}）: {ts['summary']}")
+    context_text = "\n".join(context_lines)
+
+    prompt = f"""あなたは建設業の経営分析の専門家です。
+以下は、ある建設企業の有価証券報告書を8つの観点でスコアリングした結果です。
+全タグの評価結果を踏まえて、この企業の「強み」と「弱み・課題」を総括してください。
+
+【各タグの評価結果】
+{context_text}
+
+【出力形式（JSON）】
+{{"strengths": "この企業の強みの総括（300〜500字程度）", "weaknesses": "この企業の弱み・課題の総括（300〜500字程度）"}}
+
+【制約】
+- 必ずJSON形式のみで回答してください。
+- strengthsには高スコアのタグや各タグのsummaryで言及された強みを統合して記述してください。
+- weaknessesには低スコアのタグや各タグのsummaryで言及された課題を統合して記述してください。
+- 具体的なスコアや指標を引用しながら、経営上の示唆を含めてください。
+- 「です・ます」調の敬語で記述してください。"""
+
+    result = _call_api(prompt, max_completion_tokens=3000, model_id=model_id)
+
+    try:
+        match = re.search(r'\{.*\}', result, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(0))
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    return {"strengths": "", "weaknesses": ""}
+
+
 def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID, fewshot_examples: dict | None = None) -> dict:
     """
     1つの報告書の全タグをスコアリングする。
@@ -323,24 +366,35 @@ def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID, fewshot_example
     for tag_group in report.get("tags", []):
         tag_group_map[tag_group.get("tag", "")] = tag_group
 
-    # 経営戦略以外のタグを先にスコアリング
+    # 経営戦略以外のタグを並列スコアリング
+    non_management_tags = [tag for tag in TAG_SCORING_ITEMS if tag != MANAGEMENT_TAG]
+    logger.info(f"    {len(non_management_tags)} タグを並列スコアリング中...")
+
+    scores_by_tag: dict[str, dict] = {}
+
+    def _score_one_tag(tag: str) -> tuple[str, dict]:
+        tag_group = tag_group_map.get(tag, {"tag": tag, "sections": []})
+        result = score_tag(tag_group, model_id=model_id, fewshot_examples=fewshot_examples)
+        return tag, result
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(_score_one_tag, tag): tag for tag in non_management_tags}
+        for future in as_completed(futures):
+            tag, result = future.result()
+            scores_by_tag[tag] = result
+            logger.info(f"    [{tag}] 完了")
+
+    # TAG_SCORING_ITEMS の定義順序で結果を並べ、サマリーを収集
     other_scores = []
     other_tag_summaries = []
-
-    for tag in TAG_SCORING_ITEMS:
-        if tag == MANAGEMENT_TAG:
-            continue
-
-        tag_group = tag_group_map.get(tag, {"tag": tag, "sections": []})
-        logger.info(f"    [{tag}] スコアリング中...")
-        result = score_tag(tag_group, model_id=model_id, fewshot_examples=fewshot_examples)
+    for tag in non_management_tags:
+        result = scores_by_tag[tag]
         other_scores.append(result)
 
         for item in result.get("items", []):
             score = item.get("score", "?")
             logger.info(f"      {item.get('item', '?')}: {score}/5")
 
-        # サマリー情報を収集（経営戦略タグ評価時のコンテキスト用）
         valid_scores = [it.get("score") for it in result.get("items", []) if it.get("score") is not None]
         avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
         other_tag_summaries.append({
@@ -348,8 +402,6 @@ def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID, fewshot_example
             "avg_score": avg_score,
             "summary": result.get("summary", ""),
         })
-
-        time.sleep(2)
 
     # 経営戦略・中期ビジョンを最後にスコアリング（他タグのサマリーをコンテキストとして渡す）
     management_group = tag_group_map.get(MANAGEMENT_TAG, {"tag": MANAGEMENT_TAG, "sections": []})
@@ -372,9 +424,24 @@ def score_report(report: dict, model_id: str = DEFAULT_MODEL_ID, fewshot_example
 
     scores = [scores_map[tag] for tag in TAG_SCORING_ITEMS if tag in scores_map]
 
+    # 全タグの総括（強み・弱み）
+    all_tag_summaries = []
+    for result in scores:
+        valid_scores = [it.get("score") for it in result.get("items", []) if it.get("score") is not None]
+        avg = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+        all_tag_summaries.append({
+            "tag": result["tag"],
+            "avg_score": round(avg, 2),
+            "summary": result.get("summary", ""),
+        })
+
+    logger.info("    [総括] 強み・弱みの総括を生成中...")
+    overall_summary = _generate_overall_summary(all_tag_summaries, model_id=model_id)
+
     return {
         "filename": report.get("filename", ""),
         "scores": scores,
+        "overall_summary": overall_summary,
     }
 
 

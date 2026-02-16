@@ -1,7 +1,7 @@
 import json
 import os
 import re
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
@@ -26,36 +26,14 @@ PAGE_TAGS = [
 ]
 
 
-def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MODEL_ID) -> list[dict]:
-    """
-    ページのリストを受け取り、batch_sizeページごとにAPIでセクション分割・タグ付けする。
-    1ページ内の複数セクションをそれぞれ分割し、個別にタグを付与する。
+def _process_batch(batch: list[dict], tags_list: str, model_id: str) -> list[dict]:
+    """1バッチ分のページをAPI呼び出しでタグ付けする（並列実行用）。"""
+    pages_text = ""
+    for p in batch:
+        text = p["text"] if p["text"] else "（空白ページ）"
+        pages_text += f"\n--- ページ {p['page']} ---\n{text}\n"
 
-    Args:
-        pages: load_pages() の戻り値 [{"page": 1, "text": "..."}, ...]
-        batch_size: 1回のAPI呼び出しで処理するページ数
-        model_id: 使用するモデルID
-
-    Returns:
-        list[dict]: [{"page": 1, "sections": [{"tag": "経営戦略・中期ビジョン", "text": "..."}, ...]}, ...]
-    """
-
-    if not pages:
-        return []
-
-    tagged_pages = []
-    tags_list = "\n".join(f"  {i+1}. {tag}" for i, tag in enumerate(PAGE_TAGS))
-
-    for i in range(0, len(pages), batch_size):
-        batch = pages[i:i + batch_size]
-
-        # バッチ内の各ページの全文をまとめる
-        pages_text = ""
-        for p in batch:
-            text = p["text"] if p["text"] else "（空白ページ）"
-            pages_text += f"\n--- ページ {p['page']} ---\n{text}\n"
-
-        prompt = f"""あなたは有価証券報告書の構造を理解する専門家です。
+    prompt = f"""あなたは有価証券報告書の構造を理解する専門家です。
 以下の各ページのテキストを読み、ページ内のセクションごとにテキストを分割し、最も適切なタグを1つ付けてください。
 
 【タグ一覧（括弧内は小分類の参考キーワード）】
@@ -75,50 +53,84 @@ def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MO
 【ページテキスト】
 {pages_text}"""
 
-        result = _call_api(prompt, max_completion_tokens=8000, model_id=model_id)
+    result = _call_api(prompt, max_completion_tokens=8000, model_id=model_id)
 
-        # レスポンスをパース
-        tag_map = {}
-        try:
-            match = re.search(r'\{.*\}', result, re.DOTALL)
-            if match:
-                parsed = json.loads(match.group(0))
-                # 新形式: {"pages": [{"page": N, "sections": [...]}, ...]}
-                if "pages" in parsed and isinstance(parsed["pages"], list):
-                    for entry in parsed["pages"]:
-                        if isinstance(entry, dict) and "page" in entry:
-                            tag_map[str(entry["page"])] = entry.get("sections", [])
+    # レスポンスをパース
+    tag_map = {}
+    try:
+        match = re.search(r'\{.*\}', result, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(0))
+            if "pages" in parsed and isinstance(parsed["pages"], list):
+                for entry in parsed["pages"]:
+                    if isinstance(entry, dict) and "page" in entry:
+                        tag_map[str(entry["page"])] = entry.get("sections", [])
+            else:
+                tag_map = parsed
+    except json.JSONDecodeError:
+        pass
+
+    batch_results = []
+    for p in batch:
+        sections = tag_map.get(str(p["page"]), [{"tag": "その他", "text": p["text"]}])
+        if isinstance(sections, str):
+            sections = [{"tag": "その他", "text": p["text"]}]
+        elif isinstance(sections, list):
+            normalized = []
+            for s in sections:
+                if isinstance(s, str):
+                    normalized.append({"tag": "その他", "text": s})
+                elif isinstance(s, dict):
+                    if "tags" in s and "tag" not in s:
+                        s["tag"] = s["tags"][0] if isinstance(s["tags"], list) and s["tags"] else "その他"
+                        del s["tags"]
+                    if "tag" not in s:
+                        s["tag"] = "その他"
+                    normalized.append(s)
                 else:
-                    # 旧形式フォールバック: {"1": [...], "2": [...]}
-                    tag_map = parsed
-        except json.JSONDecodeError:
-            pass
+                    normalized.append({"tag": "その他", "text": ""})
+            sections = normalized
+        batch_results.append({"page": p["page"], "sections": sections})
 
-        for p in batch:
-            sections = tag_map.get(str(p["page"]), [{"tag": "その他", "text": p["text"]}])
-            # フォールバック処理
-            if isinstance(sections, str):
-                sections = [{"tag": "その他", "text": p["text"]}]
-            elif isinstance(sections, list):
-                normalized = []
-                for s in sections:
-                    if isinstance(s, str):
-                        normalized.append({"tag": "その他", "text": s})
-                    elif isinstance(s, dict):
-                        if "tags" in s and "tag" not in s:
-                            s["tag"] = s["tags"][0] if isinstance(s["tags"], list) and s["tags"] else "その他"
-                            del s["tags"]
-                        if "tag" not in s:
-                            s["tag"] = "その他"
-                        normalized.append(s)
-                    else:
-                        normalized.append({"tag": "その他", "text": ""})
-                sections = normalized
-            tagged_pages.append({"page": p["page"], "sections": sections})
+    return batch_results
 
-        # バッチ間のレート制限
-        if i + batch_size < len(pages):
-            time.sleep(2)
+
+def tag_pages(pages: list[dict], batch_size: int = 5, model_id: str = DEFAULT_MODEL_ID, max_workers: int = 4) -> list[dict]:
+    """
+    ページのリストを受け取り、batch_sizeページごとにAPIでセクション分割・タグ付けする。
+    複数バッチを並列実行して高速化する。
+
+    Args:
+        pages: load_pages() の戻り値 [{"page": 1, "text": "..."}, ...]
+        batch_size: 1回のAPI呼び出しで処理するページ数
+        model_id: 使用するモデルID
+        max_workers: 並列実行数
+
+    Returns:
+        list[dict]: [{"page": 1, "sections": [{"tag": "経営戦略・中期ビジョン", "text": "..."}, ...]}, ...]
+    """
+    if not pages:
+        return []
+
+    tags_list = "\n".join(f"  {i+1}. {tag}" for i, tag in enumerate(PAGE_TAGS))
+    batches = [pages[i:i + batch_size] for i in range(0, len(pages), batch_size)]
+
+    # batch_index -> results のマッピング（順序保持用）
+    results_map: dict[int, list[dict]] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_process_batch, batch, tags_list, model_id): idx
+            for idx, batch in enumerate(batches)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            results_map[idx] = future.result()
+
+    # バッチ順序で結合
+    tagged_pages = []
+    for idx in range(len(batches)):
+        tagged_pages.extend(results_map[idx])
 
     return tagged_pages
 

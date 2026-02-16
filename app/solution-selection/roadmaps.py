@@ -3,6 +3,7 @@ import os
 import re
 import logging
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
@@ -169,7 +170,8 @@ def generate_impact(
 - JSON形式のみで回答。
 - 定量効果は必ず当社の直近指標値を起点にレンジで表現。
 - 仮定条件は具体的かつ検証可能な形で記載。
-- 全体で2000字以内。"""
+- 全体で2000字以内。
+- 全ての日本語テキストは「です・ます」調の敬語で記述してください。"""
 
     result = _call_api(prompt, max_completion_tokens=4000, model_id=model_id)
     parsed = _parse_json_response(result)
@@ -226,7 +228,8 @@ def generate_roadmap(
 - JSON形式のみで回答。
 - 各フェーズのactionsは2〜3項目、各項目は1行（40字以内）。
 - ideal_stateは1文（60字以内）。
-- 全体で800字以内。"""
+- 全体で800字以内。
+- 全ての日本語テキストは「です・ます」調の敬語で記述してください。"""
 
     logger = logging.getLogger(__name__)
     result = _call_api(prompt, max_completion_tokens=3000, model_id=model_id)
@@ -301,7 +304,8 @@ def generate_risks(
 - JSON形式のみで回答。
 - リスクは必ず3件（実行リスク・外部環境リスク・代替案）。
 - 全体で1000字以内。
-- trigger_or_signalは可能な限り定量的な基準を含める。"""
+- trigger_or_signalは可能な限り定量的な基準を含める。
+- 全ての日本語テキストは「です・ます」調の敬語で記述してください。"""
 
     result = _call_api(prompt, max_completion_tokens=3000, model_id=model_id)
     parsed = _parse_json_response(result)
@@ -322,20 +326,21 @@ def generate_all(
     financial_indices: dict,
     model_id: str = DEFAULT_MODEL_ID,
 ) -> dict:
-    """効果試算・ロードマップ・リスクの3セクションを一括生成する。"""
+    """効果試算・ロードマップ・リスクの3セクションを並列生成する。"""
     logger = logging.getLogger(__name__)
+    logger.info("  効果試算・ロードマップ・リスクを並列生成中...")
 
-    logger.info("  [1/3] 効果試算を生成中...")
-    impact = generate_impact(selection, financial_indices, model_id=model_id)
-    logger.info("  [1/3] 効果試算 完了")
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        f_impact = executor.submit(generate_impact, selection, financial_indices, model_id=model_id)
+        f_roadmap = executor.submit(generate_roadmap, selection, model_id=model_id)
+        f_risks = executor.submit(generate_risks, selection, model_id=model_id)
 
-    logger.info("  [2/3] ロードマップを生成中...")
-    roadmap = generate_roadmap(selection, model_id=model_id)
-    logger.info("  [2/3] ロードマップ 完了")
-
-    logger.info("  [3/3] リスクと対応策を生成中...")
-    risks = generate_risks(selection, model_id=model_id)
-    logger.info("  [3/3] リスクと対応策 完了")
+        impact = f_impact.result()
+        logger.info("  [1/3] 効果試算 完了")
+        roadmap = f_roadmap.result()
+        logger.info("  [2/3] ロードマップ 完了")
+        risks = f_risks.result()
+        logger.info("  [3/3] リスクと対応策 完了")
 
     return {
         "企業コード": selection.get("企業コード", "unknown"),

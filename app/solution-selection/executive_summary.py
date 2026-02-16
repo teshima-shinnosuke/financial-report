@@ -158,7 +158,8 @@ def generate_executive_summary(
 - contentは1つの文章として自然につなげる。見出し・番号・改行は不要。
 - 800字以内。
 - 「地域」「業界」のキーワードを自然に含め、施策が当社の立地・環境に即していることを示す。
-- 抽象的な表現は避け、数値・施策名を具体的に含める。"""
+- 抽象的な表現は避け、数値・施策名を具体的に含める。
+- 「です・ます」調の敬語で記述してください。"""
 
     result = _call_api(prompt, max_completion_tokens=3000, model_id=model_id)
     parsed = _parse_json_response(result)
@@ -181,6 +182,10 @@ def main():
 
     parser = argparse.ArgumentParser(description="エグゼクティブサマリーの生成")
     parser.add_argument("-c", "--code", required=True, help="企業コード（例: 12044）")
+    parser.add_argument("--local-features", default=None, help="local_features_*.json のパス（未指定時はコードで自動検出）")
+    parser.add_argument("--report-scores", default=None, help="report_scores_*.json のパス（未指定時はコードで自動検出）")
+    parser.add_argument("--selection", default=None, help="solution_selection_*.json のパス（未指定時はコードで自動検出）")
+    parser.add_argument("--roadmap", default=None, help="roadmap_*.json のパス（未指定時はコードで自動検出）")
     parser.add_argument("-o", "--output", default=None, help="出力JSONファイルパス（未指定時は自動生成）")
     parser.add_argument("-m", "--model", default=DEFAULT_MODEL_ID, help="使用するモデルID")
     args = parser.parse_args()
@@ -194,21 +199,21 @@ def main():
 
     code = args.code
 
-    # --- ファイルパス解決 ---
+    # --- ファイルパス解決（CLI引数優先、未指定時はコードで自動検出） ---
     paths = {
-        "local_features": os.path.join(
+        "local_features": args.local_features or os.path.join(
             base_dir, "data", "medium-output", "issue-extraction",
             "local-features-per-company", f"local_features_{code}.json",
         ),
-        "report_scores": os.path.join(
+        "report_scores": args.report_scores or os.path.join(
             base_dir, "data", "medium-output", "issue-extraction",
             "report-scores-per-company", f"report_scores_{code}_v2.json",
         ),
-        "selection": os.path.join(
+        "selection": args.selection or os.path.join(
             base_dir, "data", "medium-output", "solution-selection",
             f"solution_selection_{code}.json",
         ),
-        "roadmap": os.path.join(
+        "roadmap": args.roadmap or os.path.join(
             base_dir, "data", "medium-output", "solution-selection",
             "roadmaps-per-company", f"roadmap_{code}.json",
         ),

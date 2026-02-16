@@ -120,6 +120,15 @@ def extract_scores(scores_data) -> list[dict]:
     return scores_data.get("scores", [])
 
 
+def extract_overall_summary(scores_data) -> dict:
+    """report_scores_*.json から overall_summary を取得。"""
+    if isinstance(scores_data, list):
+        if len(scores_data) > 0:
+            return scores_data[0].get("overall_summary", {})
+        return {}
+    return scores_data.get("overall_summary", {})
+
+
 def build_tag_items(tag_data: dict) -> dict:
     """tag の items を {短縮名: score} の辞書に変換。"""
     result = {}
@@ -186,6 +195,7 @@ def assemble(code: str, sources: dict) -> dict:
     # --- analysis ---
     tag_averages = ss.get("tag_averages", {})
     scores_list = extract_scores(sources.get("report_scores"))
+    overall_summary = extract_overall_summary(sources.get("report_scores"))
 
     financial_tag_data = None
     qualitative_tags = []
@@ -272,6 +282,7 @@ def assemble(code: str, sources: dict) -> dict:
                     "tag_averages": tag_averages,
                     "financial_analysis": financial_analysis,
                     "qualitative_tags": qual_tags_output,
+                    "overall_summary": overall_summary,
                 },
             },
             {
