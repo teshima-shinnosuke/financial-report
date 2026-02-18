@@ -175,12 +175,3 @@ uv run app/json-to-docx/json-to-docx.py -i final_report_12044.json
 | `python-docx` | Word文書生成 |
 | `python-dotenv` | 環境変数管理 |
 | `json-repair` | 壊れたJSONレスポンスの自動修復 |
-
-## ブランチ運用ルール
-
-```text
-main        ← 本番用（直接pushしない）
-└── develop ← 開発統合用（各自の作業をここにマージ）
-     └── feature-igaken （個人作業用）
-     └── feature-teshi（個人作業用���
-```
