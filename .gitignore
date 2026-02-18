@@ -3,6 +3,9 @@ __pycache__/
 .DS_Store
 .env
 *.log
-data/
+data/medium-output
+data/final-output
+data/input/securities-reports
+data/input/financial-statements
 app/security_report_summarize.json
 app/security_report_summarize.json.bak
